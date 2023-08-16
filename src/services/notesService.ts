@@ -1,92 +1,141 @@
 import { Request, Response } from "express";
-import {
-  Note,
-  noteSchema,
-  categories,
-  notes,
-  setNotes,
-} from "../repositories/notesRepository";
+import { Note, noteSchema, categories } from "../repositories/notesRepository";
 import { isUniqueId } from "../helpers/noteHelpers";
+import pool from "../database/db";
 
-function getNotes(req: Request, res: Response) {
-  res.json(notes);
+async function getNotes(req: Request, res: Response) {
+  try {
+    const query = "SELECT * FROM notes";
+    const { rows } = await pool.query(query);
+    res.json(rows);
+  } catch (error) {
+    console.error("Error fetching notes", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 }
 
 async function createNote(req: Request, res: Response) {
   try {
     const validatedNote: Note = await noteSchema.validate(req.body);
+    const selectQuery = "SELECT * FROM notes";
+    const { rows } = await pool.query(selectQuery);
 
-    if (!isUniqueId(validatedNote.id, notes)) {
+    if (!isUniqueId(validatedNote.id, rows)) {
       throw new Error("The given id is already used");
     }
 
-    setNotes([...notes, validatedNote]);
+    const { id, name, created, category, content, isActive } = validatedNote;
+    const insertQuery = `
+      INSERT INTO notes (id, name, created, category, content, is_active)
+      VALUES ($1, $2, $3, $4, $5, $6)`;
+
+    await pool.query(insertQuery, [
+      id,
+      name,
+      created,
+      category,
+      content,
+      isActive.toString(),
+    ]);
     res.json({ message: "POST request successful" });
   } catch (error) {
     res.status(400).json({ error: (error as Error).message });
   }
 }
 
-function getNotesStats(req: Request, res: Response) {
-  const stats = categories.map((category) => {
-    const { activeNum, archivedNum } = notes.reduce(
-      (prevResult, note) => ({
-        activeNum:
-          prevResult.activeNum +
-          (note.isActive && note.category === category ? 1 : 0),
-        archivedNum:
-          prevResult.archivedNum +
-          (!note.isActive && note.category === category ? 1 : 0),
-      }),
-      { activeNum: 0, archivedNum: 0 }
-    );
+async function getNotesStats(req: Request, res: Response) {
+  try {
+    const selectQuery = "SELECT * FROM notes";
+    const { rows } = await pool.query(selectQuery);
 
-    return { category, activeNum, archivedNum };
-  });
+    const stats = categories.map((category) => {
+      const { activeNum, archivedNum } = rows.reduce(
+        (prevResult, note) => ({
+          activeNum:
+            prevResult.activeNum +
+            (note.is_active && note.category === category ? 1 : 0),
+          archivedNum:
+            prevResult.archivedNum +
+            (!note.is_active && note.category === category ? 1 : 0),
+        }),
+        { activeNum: 0, archivedNum: 0 }
+      );
 
-  res.json(stats);
+      return { category, activeNum, archivedNum };
+    });
+
+    res.json(stats);
+  } catch (error) {
+    console.error("Error fetching notes", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 }
 
-function getNoteById(req: Request, res: Response) {
-  const noteId = req.params.id;
-  const note = notes.find((note) => note.id === noteId);
+async function getNoteById(req: Request, res: Response) {
+  try {
+    const noteId = req.params.id;
+    const selectQuery = "SELECT * FROM notes WHERE id = $1";
+    const { rows } = await pool.query(selectQuery, [noteId]);
 
-  if (note) {
+    if (rows.length === 0) {
+      res.status(404).json({ error: "Note not found" });
+      return;
+    }
+
+    const note = rows[0];
     res.json(note);
-  } else {
-    res.status(404).json({ error: "Note not found" });
+  } catch (error) {
+    console.error("Error fetching note", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 }
 
 async function updateNote(req: Request, res: Response) {
   const noteId = req.params.id;
-  const noteIndex = notes.findIndex((note) => note.id === noteId);
 
-  if (noteIndex !== -1) {
-    try {
-      const validatedNote: Note = await noteSchema.validate(req.body);
-      const newNotes = [...notes];
-      newNotes[noteIndex] = validatedNote;
-      setNotes([...newNotes]);
+  try {
+    const validatedNote: Note = await noteSchema.validate(req.body);
+
+    const updateQuery = `
+      UPDATE notes
+      SET name = $1, created = $2, category = $3, content = $4, is_active = $5
+      WHERE id = $6`;
+
+    const values = [
+      validatedNote.name,
+      validatedNote.created,
+      validatedNote.category,
+      validatedNote.content,
+      validatedNote.isActive,
+      noteId,
+    ];
+
+    const result = await pool.query(updateQuery, values);
+
+    if (result.rowCount === 1) {
       res.json({ message: "PATCH request successful" });
-    } catch (error) {
-      res.status(400).json({ error: (error as Error).message });
+    } else {
+      res.status(404).json({ error: "Note not found" });
     }
-  } else {
-    res.status(404).json({ error: "Note not found" });
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
   }
 }
 
-function deleteNote(req: Request, res: Response) {
+async function deleteNote(req: Request, res: Response) {
   const noteId = req.params.id;
-  const noteIndex = notes.findIndex((note) => note.id === noteId);
 
-  if (noteIndex !== -1) {
-    const newNotes = notes.filter((note) => note.id !== noteId);
-    setNotes(newNotes);
-    res.json({ message: "DELETE request successful" });
-  } else {
-    res.status(404).json({ error: "Note not found" });
+  try {
+    const deleteQuery = "DELETE FROM notes WHERE id = $1";
+    const result = await pool.query(deleteQuery, [noteId]);
+
+    if (result.rowCount === 1) {
+      res.json({ message: "DELETE request successful" });
+    } else {
+      res.status(404).json({ error: "Note not found" });
+    }
+  } catch (error) {
+    res.status(500).json({ error: "Internal server error" });
   }
 }
 

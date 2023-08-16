@@ -2,19 +2,28 @@ version: "3.8"
 
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: ./
     ports:
       - "${PORT}:${PORT}"
+    environment:
+      DB_HOST: database
+      DB_PORT: "${DB_PORT}"
+      DB_USER: "${DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD}"
+      DB_NAME: "${DB_NAME}"
     depends_on:
       - database
 
   database:
     image: postgres:latest
+    restart: always
     environment:
       POSTGRES_DB: "${DB_NAME}"
       POSTGRES_USER: "${DB_USER}"
       POSTGRES_PASSWORD: "${DB_PASSWORD}"
     ports:
       - "${DB_PORT}:${DB_PORT}"
+
+volumes:
+  api:
+  database:

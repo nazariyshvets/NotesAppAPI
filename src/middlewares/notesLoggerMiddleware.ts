@@ -1,8 +1,8 @@
 import { Request, Response, NextFunction } from "express";
-import { notes } from "../repositories/notesRepository";
 import { noteToString } from "../helpers/noteHelpers";
+import pool from "../database/db";
 
-function notesLoggerMiddleware(
+async function notesLoggerMiddleware(
   req: Request,
   res: Response,
   next: NextFunction
@@ -11,8 +11,14 @@ function notesLoggerMiddleware(
   next();
 
   if (req.method !== "GET") {
-    const notesString = notes.map((note) => noteToString(note)).join("");
-    console.log(`Notes: ${notesString}`);
+    try {
+      const query = "SELECT * FROM notes";
+      const { rows } = await pool.query(query);
+      const notesString = rows.map((note) => noteToString(note)).join("");
+      console.log(`Notes: ${notesString}`);
+    } catch (error) {
+      res.status(500).json({ error: "Internal server error" });
+    }
   }
 }
 
